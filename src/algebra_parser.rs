@@ -1,4 +1,4 @@
-use itertools::Itertools::*;
+use itertools::Itertools;
 use std::collections::HashMap;
 // Lexical Analysis Errors
 const PROCEDURE_SYNTAX_ERROR: &str = "Attempted to locate procedure: Unsucessful";
@@ -71,9 +71,9 @@ pub mod lexical_analyzer {
                     let mut variables_iteration = 0;
                     let mut variables_iter = expression.chars().multipeek();
                     while let Some(x) = variables_iter.next() {
-                        variables_iteration += 1
-                        if (variables_iteration < 0) {
-                            
+                        variables_iteration += 1;
+                        if (variables_iteration < position) {
+                            continue;
                         }
                         name_length += 1;
                         let is_alphabetic = x.is_alphabetic();
@@ -85,27 +85,43 @@ pub mod lexical_analyzer {
                             } else {
                                 let f1 = (x == '(');
                                 let f2 = {
-                                    let temp_parenthesis_check = 0;
-                                    let is_first_iteration = true;
+                                    let mut temp_parenthesis_check = 0;
+                                    let mut is_first_iteration = true;
                                     let mut n_peek = variables_iter.peek();
-                                    while (!(is_first_iteration) && temp_parenthesis_check > 0) {
+                                    let mut break_flag = false;
+                                    let mut match_success = false;
+                                    while (!is_first_iteration) {
                                         if (is_first_iteration) {
                                             is_first_iteration = false;
+                                        } else if (temp_parenthesis_check <= 0) {
+                                            match_success = true;
+                                            break;
                                         }
-                                        if (n_peek == '(') {
-                                            temp_parenthesis_check += 1;
-                                        } else if (n_peek == ')') {
-                                            temp_parenthesis_check -= 1;
+                                        match n_peek {
+                                            Some(v) => {
+                                                if (*v == '(') {
+                                                    temp_parenthesis_check += 1;
+                                                } else if (*v == ')') {
+                                                    temp_parenthesis_check -= 1;
+                                                }
+                                            }
+                                            None => {
+                                                break_flag = true;
+                                            }
                                         }
-                                        n_peek =
+                                        if (break_flag) {
+                                            break;
+                                        }
+                                        n_peek = variables_iter.peek();
                                     }
+                                    match_success
                                 };
                                 let f3 = (*variables_iter.peek().unwrap() == ')');
                                 if !(f1 && f2) {
                                     invalid_flag = true;
                                     break;
                                 }
-                                token = Some(Tokens::Procedure(name_length));
+                                // token = Some(Tokens::Procedure(name_length));
                                 break;
                             }
                         }
@@ -135,10 +151,12 @@ pub mod lexical_analyzer {
         }
         return Ok(tokenized_map);
     }
-    pub fn get_terms(tokenized_map: HashMap<&str, Vec<Tokens>>) -> Vec<&str> {
+    pub fn get_terms<'a>(tokenized_map: HashMap<&'a str, Vec<Tokens>>) -> Vec<&'a str> {
         // After lexical analysis has been successful, retrieve terms
+        let vector = Vec::new();
+        vector
     }
-    fn match_operation(operation: char) -> Option<Tokens> {
+    fn match_operation<'a>(operation: char) -> Option<Tokens<'a>> {
         match operation {
             '(' => Some(Tokens::ParenthesisLeft),
             ')' => Some(Tokens::ParenthesisRight),
