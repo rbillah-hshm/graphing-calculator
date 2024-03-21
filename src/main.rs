@@ -1,0 +1,206 @@
+use std::collections::HashMap;
+use std::f64::consts::PI;
+use std::iter::Scan;
+
+use macroquad::color::Color;
+use macroquad::miniquad::window::screen_size;
+use macroquad::prelude::*;
+use macroquad::ui::{
+    hash, root_ui,
+    widgets::{self, Group},
+    Drag, Ui,
+};
+mod algebra_parser;
+mod derivative_solver;
+type NumberDependency = f64;
+static mut SCREEN_WIDTH: NumberDependency = 0.0;
+static mut SCREEN_HEIGHT: NumberDependency = 0.0;
+static mut SETTINGS_POSITION: Vec2 = vec2(0.0, 0.0);
+type CanvasDimensions<'a> = &'a mut NumberDependency;
+
+// Helper Functions
+fn area_of_circle(radius: NumberDependency) -> NumberDependency {
+    return (PI as NumberDependency) * radius.powf(2.0);
+}
+fn radius_from_area_of_circle(area: NumberDependency) -> NumberDependency {
+    return (area / PI).sqrt();
+}
+//
+
+struct AppState<'a, 'b> {
+    // Settings
+    settings_position: &'b mut Vec2,
+    resolution_slider_value: &'a mut f32,
+    //
+    old_screen_width: &'a mut f32,
+    old_screen_height: &'a mut f32,
+}
+trait ShapeScale {
+    fn draw_figure(&self, color: Color);
+}
+#[derive(Copy, Clone)]
+struct Circle {
+    radius: NumberDependency,
+    x_pos: NumberDependency,
+    y_pos: NumberDependency,
+
+    original_width: NumberDependency,
+    original_height: NumberDependency,
+}
+impl ShapeScale for Circle {
+    fn draw_figure(&self, color: Color) {
+        let screen_width = unsafe { SCREEN_WIDTH } as NumberDependency;
+        let screen_height = unsafe { SCREEN_HEIGHT } as NumberDependency;
+        let old_area = self.original_width * self.original_height;
+        let new_area = screen_width * screen_height;
+        // println!("{}", radius_from_area_of_circle(((area_of_circle(self.radius) / old_area) * new_area)));
+        draw_circle(
+            ((self.x_pos / self.original_width) * screen_width) as f32,
+            ((self.y_pos / self.original_height) * screen_height) as f32,
+            radius_from_area_of_circle(((area_of_circle(self.radius) / old_area) * new_area))
+                as f32,
+            color,
+        );
+        // println!("{}", old_area);
+        // println!("{}", new_area);
+    }
+}
+fn create_circle(
+    circle_radius: NumberDependency,
+    circle_x_pos: NumberDependency,
+    circle_y_pos: NumberDependency,
+) -> Circle {
+    Circle {
+        radius: circle_radius,
+        x_pos: circle_x_pos,
+        y_pos: circle_y_pos,
+        original_width: screen_width() as NumberDependency,
+        original_height: screen_height() as NumberDependency,
+    }
+}
+fn update_dimensions() {
+    unsafe {
+        SCREEN_WIDTH = screen_width() as f64;
+        SCREEN_HEIGHT = screen_height() as f64;
+    }
+}
+struct CircleCache {
+    cache: Vec<Circle>,
+}
+impl CircleCache {
+    fn push(&mut self, new_circle: Circle) -> bool {
+        let index = self.cache.iter().position(|&item| {
+            (item.radius == new_circle.radius)
+                && (item.x_pos == new_circle.x_pos)
+                && (item.y_pos == new_circle.y_pos)
+        });
+        let mut flag = false;
+        match index {
+            Some(_t) => {
+                // println!("Already inserted circle into cache!");
+            }
+            None => {
+                flag = true;
+                self.cache.push(new_circle.clone());
+            }
+        }
+        flag
+    }
+    fn execute_drawings(&self) {
+        for circle in self.cache.iter() {
+            circle.draw_figure(BLACK);
+        }
+    }
+}
+fn create_ui(global_state: &mut AppState) {
+    widgets::Window::new(hash!(), *global_state.settings_position, vec2(320.0, 400.0))
+        .label("Settings")
+        .movable(true)
+        .ui(&mut *root_ui(), |ui| {
+            ui.label(None, "Resolution Slider:");
+            ui.slider(
+                hash!(),
+                "(0 .. 1)",
+                0.0f32..1.0f32,
+                global_state.resolution_slider_value,
+            );
+            println!("{:?}", ui.is_mouse_captured());
+            if (ui.is_dragging()) {
+                println!("RAN");
+                let delta = mouse_delta_position();
+                unsafe {
+                    SETTINGS_POSITION = vec2(
+                        global_state.settings_position.x + delta.x,
+                        global_state.settings_position.y + delta.y,
+                    );
+                    global_state.settings_position = &mut SETTINGS_POSITION;
+                }
+            }
+        });
+}
+fn update_resolution(global_state: &mut AppState) {
+    let is_width_too_small = (1920.0 * *global_state.resolution_slider_value) < 500.0;
+    let is_height_too_small = (1080.0 * *global_state.resolution_slider_value) < 500.0;
+    if ((screen_height() > screen_width()) && is_width_too_small) {
+        println!("WIDTH TOO SMALL");
+        request_new_screen_size(500.0, (1920.0 / 1080.0) * 500.0);
+        return;
+    } else if ((screen_width() > screen_height()) && is_height_too_small) {
+        println!("HEIGHT TOO SMALL");
+        request_new_screen_size((1920.0 / 1080.0) * 500.0, 500.0);
+        return;
+    }
+    request_new_screen_size(
+        1920.0 * *global_state.resolution_slider_value,
+        1080.0 * *global_state.resolution_slider_value,
+    );
+}
+#[macroquad::main("GRAPHING_CALCULATOR")]
+async fn main() {
+    let mut resolution_slider_value = 1.0f32;
+    let mut old_screen_width = screen_width();
+    let mut old_screen_height = screen_height();
+    let mut settings_position = vec2(400.0, 200.0);
+    let mut GlobalState = AppState {
+        resolution_slider_value: &mut resolution_slider_value,
+        old_screen_width: &mut old_screen_width,
+        old_screen_height: &mut old_screen_height,
+        settings_position: &mut settings_position,
+    };
+    let mut circle_cache = CircleCache { cache: Vec::new() };
+    request_new_screen_size(1920.0, 1080.0);
+    let mut is_first_iteration = true;
+    let mut old_time = 0;
+    loop {
+        // Code that must run at the beginning of the frame
+        if (is_first_iteration) {
+            is_first_iteration = false;
+            while ((1920.0 != screen_width()) && (1080.0 != screen_height())) {
+                next_frame().await;
+            }
+            continue;
+        }
+        clear_background(WHITE);
+        update_dimensions();
+        create_ui(&mut GlobalState);
+        let rounded_time = get_time().ceil() as i32;
+        if ((rounded_time % 2) == 0) && (old_time != rounded_time) {
+            old_time = rounded_time;
+            update_resolution(&mut GlobalState);
+        }
+        // Body Code
+        let circle_radius = 150.0;
+        let circle_x_pos = 200.0;
+        let circle_y_pos = 200.0;
+        let circle = create_circle(
+            NumberDependency::from(circle_radius),
+            NumberDependency::from(circle_x_pos),
+            NumberDependency::from(circle_y_pos),
+        );
+        circle_cache.push(circle);
+        // Code that must run at the end of the frame
+        // println!("{:?}", GlobalState.settings_position);
+        circle_cache.execute_drawings();
+        next_frame().await;
+    }
+}
