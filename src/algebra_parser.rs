@@ -1,5 +1,7 @@
 use itertools::Itertools;
+use std::backtrace::Backtrace;
 use std::collections::HashMap;
+use std::fmt::Debug;
 // Lexical Analysis Errors
 const PROCEDURE_SYNTAX_ERROR: &str = "Attempted to locate procedure: Unsucessful";
 const PARENTHESIS_ASSIGN_ERROR: &str = "Could not find correspondence for every parenthesis";
@@ -7,21 +9,47 @@ const PARENTHESIS_ASSIGN_ERROR: &str = "Could not find correspondence for every 
 #[derive(Debug)]
 #[repr(i32)]
 enum Tokens<'a> {
-    ParenthesisLeft = 62,
-    ParenthesisRight = 61,
-    Function = 60,
-    Exponent = 50,
-    Mul = 41,
-    Div = 40,
-    Add = 30,
-    Sub = 20,
-    Procedure(
-        i32,
-        Box<Result<(HashMap<&'a str, String>, Tokens<'a>), &'a str>>,
-    ) = 12,
-    Variable(i32) = 11,
-    Number(i32) = 10,
+    ParenthesisLeft,
+    ParenthesisRight,
+    Function,
+    Exponent,
+    Mul,
+    Div,
+    Add,
+    Sub,
+    Procedure(i32, Box<(HashMap<&'a str, String>, Tokens<'a>)>),
+    Variable(i32),
+    Number(i32),
 }
+enum FilterType {
+    WhiteList,
+    BlackList,
+}
+struct FilterList<'a> {
+    list_type: FilterType,
+    list: Vec<&'a str>,
+}
+#[derive(Debug)]
+struct TracebackWrapper<'a, T> {
+    err: Result<T, &'a str>,
+    traceback: String,
+}
+enum TraceExists<'a, T> {
+    Wrapper(TracebackWrapper<'a, T>),
+    Success(T),
+}
+macro_rules! backtrace_wrapper {
+    ($backtrace_wrapper:ident, $name:ty) => {
+        fn $backtrace_wrapper<'a>(err: Result<$name, &'a str>) -> TraceExists<'a, $name> {
+            return TraceExists::Wrapper(TracebackWrapper {
+                err: err,
+                traceback: Backtrace::force_capture().to_string(),
+            })
+        }
+    };
+}
+type LexicalTracerType<'a> = HashMap<&'a str, Vec<Tokens<'a>>>;
+backtrace_wrapper!(lexical_tracer, LexicalTracerType<'a>);
 pub mod lexical_analyzer {
     use super::*;
     pub fn clean<'a>(function_map: &HashMap<&'a str, String>) -> HashMap<&'a str, String> {
@@ -32,11 +60,11 @@ pub mod lexical_analyzer {
     }
     pub fn analyze<'a>(
         function_map: &HashMap<&'a str, String>,
-    ) -> Result<HashMap<&'a str, Vec<Tokens<'a>>>, &'a str> {
+        filter_list: Option<FilterList>,
+    ) -> TraceExists<'a, LexicalTracerType<'a>> {
         let mut tokenized_map = HashMap::new();
         for (function, expression) in function_map.iter() {
             let mut vector = Vec::new();
-
             let mut expression_iterator = expression.chars().enumerate();
             let mut parenthesis_check = 0;
             let analyze = |position: usize, char: char| {};
@@ -87,10 +115,11 @@ pub mod lexical_analyzer {
                                 let f2 = {
                                     let mut temp_parenthesis_check = 0;
                                     let mut is_first_iteration = true;
-                                    let mut n_peek = variables_iter.peek();
                                     let mut break_flag = false;
                                     let mut match_success = false;
-                                    while (!is_first_iteration) {
+                                    let mut n_peek = variables_iter.peek();
+                                    let nested_functions: Vec<&str> = Vec::new();
+                                    while (!is_first_iteration && !break_flag) {
                                         if (is_first_iteration) {
                                             is_first_iteration = false;
                                         } else if (temp_parenthesis_check <= 0) {
@@ -101,6 +130,29 @@ pub mod lexical_analyzer {
                                             Some(v) => {
                                                 if (*v == '(') {
                                                     temp_parenthesis_check += 1;
+                                                    let mut rev_find_variable = expression
+                                                        .chars()
+                                                        .rev()
+                                                        .skip(expression.len() - position);
+                                                    let mut rev_iteration = 0;
+                                                    let mut flag = false;
+                                                    let mut name =
+                                                        String::with_capacity(expression.len());
+                                                    while let Some(w) = rev_find_variable.next() {
+                                                        rev_iteration += 1;
+                                                        if (!w.is_alphabetic()) {
+                                                            if (self::match_operation(w).is_some())
+                                                            {
+                                                                if (rev_iteration > 1) {
+                                                                    flag = true;
+                                                                }
+                                                            }
+                                                            break;
+                                                        } else {
+                                                            name.push(w);
+                                                        }
+                                                    }
+                                                    if (flag) {}
                                                 } else if (*v == ')') {
                                                     temp_parenthesis_check -= 1;
                                                 }
@@ -109,21 +161,20 @@ pub mod lexical_analyzer {
                                                 break_flag = true;
                                             }
                                         }
-                                        if (break_flag) {
-                                            break;
-                                        }
                                         n_peek = variables_iter.peek();
                                     }
-                                    match_success
+                                    match break_flag {
+                                        true => Ok(match_success),
+                                        false => Err(PARENTHESIS_ASSIGN_ERROR),
+                                    }
                                 };
-                                let f3 = (*variables_iter.peek().unwrap() == ')');
-                                if !(f1 && f2) {
+                                if !(f1 && f2.is_ok()) {
                                     invalid_flag = true;
                                     break;
                                 }
                                 // token = Some(Tokens::Procedure(name_length));
                                 break;
-                            }
+                            };
                         }
                         expression_iterator.next();
                         if (x.is_alphabetic()) {
@@ -132,7 +183,7 @@ pub mod lexical_analyzer {
                         break;
                     }
                     if (invalid_flag) {
-                        return Err(PROCEDURE_SYNTAX_ERROR);
+                        return lexical_tracer(Err(PROCEDURE_SYNTAX_ERROR));
                     }
                 } else {
                     token = match_operation(char);
@@ -145,11 +196,11 @@ pub mod lexical_analyzer {
                 }
             }
             if (parenthesis_check != 0) {
-                return Err(PARENTHESIS_ASSIGN_ERROR);
+                return lexical_tracer(Err(PARENTHESIS_ASSIGN_ERROR));
             }
             tokenized_map.insert(*function, vector);
         }
-        return Ok(tokenized_map);
+        return TraceExists::Success(tokenized_map);
     }
     pub fn get_terms<'a>(tokenized_map: HashMap<&'a str, Vec<Tokens>>) -> Vec<&'a str> {
         // After lexical analysis has been successful, retrieve terms
@@ -168,6 +219,27 @@ pub mod lexical_analyzer {
             _ => None,
         }
     }
+    fn match_token_to_priority(operation: Tokens) -> isize {
+        match operation {
+            Tokens::ParenthesisLeft => 11,
+            Tokens::ParenthesisRight => 10,
+            Tokens::Function => 9,
+            Tokens::Exponent => 8,
+            Tokens::Mul => 7,
+            Tokens::Div => 6,
+            Tokens::Add => 5,
+            Tokens::Sub => 4,
+            Tokens::Procedure(x, y) => 3,
+            Tokens::Variable(x) => 2,
+            Tokens::Number(x) => 1,
+        }
+    }
+    fn token_is_less_than(a: Tokens, b: Tokens) -> bool {
+        match_token_to_priority(a) < match_token_to_priority(b)
+    }
+    fn token_is_greater_than(a: Tokens, b: Tokens) -> bool {
+        match_token_to_priority(a) > match_token_to_priority(b)
+    }
 }
 #[cfg(test)]
 mod test {
@@ -179,7 +251,10 @@ mod test {
 pub fn generate_all_ast(data: &HashMap<&str, String>) {
     let mut function_map = (*data).clone();
     function_map = lexical_analyzer::clean(&function_map);
-    let tokenized_map = lexical_analyzer::analyze(&function_map);
-    println!("{:?}", tokenized_map.ok().unwrap());
+    let tokenized_map = lexical_analyzer::analyze(&function_map, None);
+    match tokenized_map {
+        TraceExists::Success(x) => {}
+        TraceExists::Wrapper(x) => {}
+    }
 }
 //

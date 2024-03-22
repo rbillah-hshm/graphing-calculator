@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(unused_parens)]
+#![allow(unused_variables)]
 use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::iter::Scan;
