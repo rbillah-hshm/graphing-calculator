@@ -164,11 +164,13 @@ pub mod lexical_analyzer {
                                         n_peek = variables_iter.peek();
                                     }
                                     match break_flag {
-                                        true => Ok(match_success),
-                                        false => Err(PARENTHESIS_ASSIGN_ERROR),
+                                        true => None,
+                                        false => {
+                                            Some(lexical_tracer(Err(PARENTHESIS_ASSIGN_ERROR)))
+                                        }
                                     }
                                 };
-                                if !(f1 && f2.is_ok()) {
+                                if !(f1 && f2.is_some()) {
                                     invalid_flag = true;
                                     break;
                                 }
@@ -219,26 +221,26 @@ pub mod lexical_analyzer {
             _ => None,
         }
     }
-    fn match_token_to_priority(operation: Tokens) -> isize {
+    fn match_token_to_priority(operation: Tokens) -> f32 {
         match operation {
-            Tokens::ParenthesisLeft => 11,
-            Tokens::ParenthesisRight => 10,
-            Tokens::Function => 9,
-            Tokens::Exponent => 8,
-            Tokens::Mul => 7,
-            Tokens::Div => 6,
-            Tokens::Add => 5,
-            Tokens::Sub => 4,
-            Tokens::Procedure(x, y) => 3,
-            Tokens::Variable(x) => 2,
-            Tokens::Number(x) => 1,
+            Tokens::ParenthesisLeft => 61 as f32,
+            Tokens::ParenthesisRight => 60 as f32,
+            Tokens::Function => 50 as f32,
+            Tokens::Exponent => 40 as f32,
+            Tokens::Mul => 31 as f32,
+            Tokens::Div => 30 as f32,
+            Tokens::Add => 20 as f32,
+            Tokens::Sub => 10 as f32,
+            Tokens::Procedure(x, y) => 3 as f32,
+            Tokens::Variable(x) => 2 as f32,
+            Tokens::Number(x) => 1 as f32,
         }
     }
     fn token_is_less_than(a: Tokens, b: Tokens) -> bool {
-        match_token_to_priority(a) < match_token_to_priority(b)
+        (match_token_to_priority(a) / 10.0).floor() < (match_token_to_priority(b) / 10.0).floor()
     }
     fn token_is_greater_than(a: Tokens, b: Tokens) -> bool {
-        match_token_to_priority(a) > match_token_to_priority(b)
+        (match_token_to_priority(a) / 10.0).floor() > (match_token_to_priority(b) / 10.0).floor()
     }
 }
 #[cfg(test)]

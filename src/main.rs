@@ -8,6 +8,7 @@ use std::iter::Scan;
 use macroquad::color::Color;
 use macroquad::miniquad::window::screen_size;
 use macroquad::prelude::*;
+use macroquad::text::*;
 use macroquad::ui::{
     hash, root_ui,
     widgets::{self, Group},
@@ -64,8 +65,6 @@ impl ShapeScale for Circle {
                 as f32,
             color,
         );
-        // println!("{}", old_area);
-        // println!("{}", new_area);
     }
 }
 fn create_circle(
@@ -116,6 +115,21 @@ impl CircleCache {
     }
 }
 fn create_ui(global_state: &mut AppState) {
+    let (font_size, font_scale, font_aspect) = camera_font_scale(70.0);
+    let params = TextParams {
+        font_size,
+        font_scale,
+        font_scale_aspect: font_aspect,
+        color: BLACK,
+        ..Default::default()
+    };
+    println!("{}", get_fps().to_string().as_str());
+    draw_text_ex(
+        get_fps().to_string().as_str(),
+        screen_width() / 12.0,
+        screen_height() / 12.0,
+        params,
+    );
     widgets::Window::new(hash!(), *global_state.settings_position, vec2(320.0, 400.0))
         .label("Settings")
         .movable(true)
@@ -160,6 +174,7 @@ fn update_resolution(global_state: &mut AppState) {
 }
 #[macroquad::main("GRAPHING_CALCULATOR")]
 async fn main() {
+    let font = load_ttf_font("./fonts/Iosevka.ttf").await.unwrap();
     let mut resolution_slider_value = 1.0f32;
     let mut old_screen_width = screen_width();
     let mut old_screen_height = screen_height();
@@ -203,7 +218,7 @@ async fn main() {
         circle_cache.push(circle);
         // Code that must run at the end of the frame
         // println!("{:?}", GlobalState.settings_position);
-        circle_cache.execute_drawings();
+        // circle_cache.execute_drawings();
         next_frame().await;
     }
 }
