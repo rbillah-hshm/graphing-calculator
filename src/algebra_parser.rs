@@ -40,16 +40,16 @@ enum TraceExists<'a, T> {
 }
 macro_rules! backtrace_wrapper {
     ($backtrace_wrapper:ident, $name:ty) => {
-        fn $backtrace_wrapper<'a>(err: Result<$name, &'a str>) -> TraceExists<'a, $name> {
-            return TraceExists::Wrapper(TracebackWrapper {
+        let mut error_store: Vec<TraceExists<'a, $name>> = Vec::new();
+        let mut $backtrace_wrapper = |err: Result<$name, &'a str>| {
+            error_store.push(TraceExists::Wrapper(TracebackWrapper {
                 err: err,
                 traceback: Backtrace::force_capture().to_string(),
-            })
-        }
+            }));
+        };
     };
 }
 type LexicalTracerType<'a> = HashMap<&'a str, Vec<Tokens<'a>>>;
-backtrace_wrapper!(lexical_tracer, LexicalTracerType<'a>);
 pub mod lexical_analyzer {
     use super::*;
     pub fn clean<'a>(function_map: &HashMap<&'a str, String>) -> HashMap<&'a str, String> {
@@ -62,6 +62,7 @@ pub mod lexical_analyzer {
         function_map: &HashMap<&'a str, String>,
         filter_list: Option<FilterList>,
     ) -> TraceExists<'a, LexicalTracerType<'a>> {
+        backtrace_wrapper!(lexical_tracer, LexicalTracerType<'a>);
         let mut tokenized_map = HashMap::new();
         for (function, expression) in function_map.iter() {
             let mut vector = Vec::new();
@@ -163,14 +164,9 @@ pub mod lexical_analyzer {
                                         }
                                         n_peek = variables_iter.peek();
                                     }
-                                    match break_flag {
-                                        true => None,
-                                        false => {
-                                            Some(lexical_tracer(Err(PARENTHESIS_ASSIGN_ERROR)))
-                                        }
-                                    }
+                                    match_success || break_flag
                                 };
-                                if !(f1 && f2.is_some()) {
+                                if !(f1 && f2) {
                                     invalid_flag = true;
                                     break;
                                 }
@@ -185,7 +181,7 @@ pub mod lexical_analyzer {
                         break;
                     }
                     if (invalid_flag) {
-                        return lexical_tracer(Err(PROCEDURE_SYNTAX_ERROR));
+                        lexical_tracer(Err(PROCEDURE_SYNTAX_ERROR));
                     }
                 } else {
                     token = match_operation(char);
@@ -198,7 +194,7 @@ pub mod lexical_analyzer {
                 }
             }
             if (parenthesis_check != 0) {
-                return lexical_tracer(Err(PARENTHESIS_ASSIGN_ERROR));
+                lexical_tracer(Err(PARENTHESIS_ASSIGN_ERROR));
             }
             tokenized_map.insert(*function, vector);
         }

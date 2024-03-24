@@ -4,7 +4,9 @@
 use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::iter::Scan;
+use std::rc::Rc;
 
+use cooldown::*;
 use macroquad::color::Color;
 use macroquad::miniquad::window::screen_size;
 use macroquad::prelude::*;
@@ -15,6 +17,7 @@ use macroquad::ui::{
     Drag, Ui,
 };
 mod algebra_parser;
+mod cooldown;
 mod derivative_solver;
 type NumberDependency = f64;
 static mut SCREEN_WIDTH: NumberDependency = 0.0;
@@ -38,6 +41,12 @@ struct AppState<'a, 'b> {
     //
     old_screen_width: &'a mut f32,
     old_screen_height: &'a mut f32,
+    current_fps: i32,
+}
+impl<'a, 'b> AppState<'a, 'b> {
+    fn update_fps(&mut self) {
+        self.current_fps = get_fps();
+    }
 }
 trait ShapeScale {
     fn draw_figure(&self, color: Color);
@@ -123,9 +132,8 @@ fn create_ui(global_state: &mut AppState) {
         color: BLACK,
         ..Default::default()
     };
-    println!("{}", get_fps().to_string().as_str());
     draw_text_ex(
-        get_fps().to_string().as_str(),
+        global_state.current_fps.to_string().as_str(),
         screen_width() / 12.0,
         screen_height() / 12.0,
         params,
@@ -141,9 +149,7 @@ fn create_ui(global_state: &mut AppState) {
                 0.0f32..1.0f32,
                 global_state.resolution_slider_value,
             );
-            println!("{:?}", ui.is_mouse_captured());
             if (ui.is_dragging()) {
-                println!("RAN");
                 let delta = mouse_delta_position();
                 unsafe {
                     SETTINGS_POSITION = vec2(
@@ -155,6 +161,7 @@ fn create_ui(global_state: &mut AppState) {
             }
         });
 }
+fn draw_fps(cooldown_storage: HashMap<&str, cooldown::Object>) {}
 fn update_resolution(global_state: &mut AppState) {
     let is_width_too_small = (1920.0 * *global_state.resolution_slider_value) < 500.0;
     let is_height_too_small = (1080.0 * *global_state.resolution_slider_value) < 500.0;
@@ -174,7 +181,6 @@ fn update_resolution(global_state: &mut AppState) {
 }
 #[macroquad::main("GRAPHING_CALCULATOR")]
 async fn main() {
-    let font = load_ttf_font("./fonts/Iosevka.ttf").await.unwrap();
     let mut resolution_slider_value = 1.0f32;
     let mut old_screen_width = screen_width();
     let mut old_screen_height = screen_height();
@@ -184,11 +190,14 @@ async fn main() {
         old_screen_width: &mut old_screen_width,
         old_screen_height: &mut old_screen_height,
         settings_position: &mut settings_position,
+        current_fps: get_fps(),
     };
     let mut circle_cache = CircleCache { cache: Vec::new() };
     request_new_screen_size(1920.0, 1080.0);
     let mut is_first_iteration = true;
-    let mut old_time = 0;
+    let mut cooldown_storage = HashMap::new();
+    let resolution_cooldown = cooldown::job::add(&mut cooldown_storage, "resolution", 2);
+    let fps_cooldown = cooldown::job::add(&mut cooldown_storage, "fps", 1);
     loop {
         // Code that must run at the beginning of the frame
         if (is_first_iteration) {
@@ -198,14 +207,16 @@ async fn main() {
             }
             continue;
         }
+        cooldown::job::update(&mut cooldown_storage);
         clear_background(WHITE);
-        update_dimensions();
-        create_ui(&mut GlobalState);
-        let rounded_time = get_time().ceil() as i32;
-        if ((rounded_time % 2) == 0) && (old_time != rounded_time) {
-            old_time = rounded_time;
+        if (cooldown::job::is_on(&cooldown_storage, "resolution")) {
             update_resolution(&mut GlobalState);
         }
+        if cooldown::job::is_on(&cooldown_storage, "fps") {
+            GlobalState.current_fps = get_fps();
+        }
+        update_dimensions();
+        create_ui(&mut GlobalState);
         // Body Code
         let circle_radius = 150.0;
         let circle_x_pos = 200.0;
@@ -217,8 +228,7 @@ async fn main() {
         );
         circle_cache.push(circle);
         // Code that must run at the end of the frame
-        // println!("{:?}", GlobalState.settings_position);
-        // circle_cache.execute_drawings();
+        cooldown::job::update_next(&mut cooldown_storage);
         next_frame().await;
     }
 }
