@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::iter::Scan;
+use std::ops::Add;
 use std::rc::Rc;
 
 use cooldown::*;
@@ -17,11 +18,10 @@ use macroquad::ui::{
     Drag, Ui,
 };
 mod algebra_parser;
+mod big_number;
 mod cooldown;
 mod derivative_solver;
 type NumberDependency = f64;
-static mut SCREEN_WIDTH: NumberDependency = 0.0;
-static mut SCREEN_HEIGHT: NumberDependency = 0.0;
 static mut SETTINGS_POSITION: Vec2 = vec2(0.0, 0.0);
 type CanvasDimensions<'a> = &'a mut NumberDependency;
 
@@ -31,6 +31,9 @@ fn area_of_circle(radius: NumberDependency) -> NumberDependency {
 }
 fn radius_from_area_of_circle(area: NumberDependency) -> NumberDependency {
     return (area / PI).sqrt();
+}
+fn negate_vector(vector: Vec2) -> Vec2 {
+    vec2(-vector.x, -vector.y)
 }
 //
 
@@ -62,8 +65,8 @@ struct Circle {
 }
 impl ShapeScale for Circle {
     fn draw_figure(&self, color: Color) {
-        let screen_width = unsafe { SCREEN_WIDTH } as NumberDependency;
-        let screen_height = unsafe { SCREEN_HEIGHT } as NumberDependency;
+        let screen_width = screen_width() as NumberDependency;
+        let screen_height = screen_height() as NumberDependency;
         let old_area = self.original_width * self.original_height;
         let new_area = screen_width * screen_height;
         // println!("{}", radius_from_area_of_circle(((area_of_circle(self.radius) / old_area) * new_area)));
@@ -87,12 +90,6 @@ fn create_circle(
         y_pos: circle_y_pos,
         original_width: screen_width() as NumberDependency,
         original_height: screen_height() as NumberDependency,
-    }
-}
-fn update_dimensions() {
-    unsafe {
-        SCREEN_WIDTH = screen_width() as f64;
-        SCREEN_HEIGHT = screen_height() as f64;
     }
 }
 struct CircleCache {
@@ -161,7 +158,6 @@ fn create_ui(global_state: &mut AppState) {
             }
         });
 }
-fn draw_fps(cooldown_storage: HashMap<&str, cooldown::Object>) {}
 fn update_resolution(global_state: &mut AppState) {
     let is_width_too_small = (1920.0 * *global_state.resolution_slider_value) < 500.0;
     let is_height_too_small = (1080.0 * *global_state.resolution_slider_value) < 500.0;
@@ -178,6 +174,21 @@ fn update_resolution(global_state: &mut AppState) {
         1920.0 * *global_state.resolution_slider_value,
         1080.0 * *global_state.resolution_slider_value,
     );
+}
+struct Camera {
+    position: Vec2,
+    number_distance: f32,
+}
+impl Camera {
+    fn new() -> Self {
+        Camera {
+            position: vec2(0.0, 0.0),
+            number_distance: screen_width() / 10.0,
+        }
+    }
+}
+fn update_grid(camera: &Camera) {
+    let origin_offset = camera.position;
 }
 #[macroquad::main("GRAPHING_CALCULATOR")]
 async fn main() {
@@ -198,6 +209,7 @@ async fn main() {
     let mut cooldown_storage = HashMap::new();
     let resolution_cooldown = cooldown::job::add(&mut cooldown_storage, "resolution", 2);
     let fps_cooldown = cooldown::job::add(&mut cooldown_storage, "fps", 1);
+    let camera = Camera::new();
     loop {
         // Code that must run at the beginning of the frame
         if (is_first_iteration) {
@@ -227,6 +239,7 @@ async fn main() {
             NumberDependency::from(circle_y_pos),
         );
         circle_cache.push(circle);
+        update_grid(&camera);
         // Code that must run at the end of the frame
         cooldown::job::update_next(&mut cooldown_storage);
         next_frame().await;
