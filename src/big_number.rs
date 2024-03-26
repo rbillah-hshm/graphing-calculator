@@ -32,6 +32,18 @@ pub enum Format<'a> {
 pub struct BigNumber<'a> {
     serialized: Format<'a>,
 }
+macro_rules! handle_analysis_errors {
+    ($condition:expr, $error:expr) => {
+        if ($condition) {
+            match $error.err().unwrap() {
+                AnalysisErrors::InvalidPrefix => {}
+                AnalysisErrors::InvalidSuffix => {}
+                AnalysisErrors::InvalidExponent => {}
+            }
+            return;
+        }
+    };
+}
 impl<'a> BigNumber<'a> {
     pub fn get_value(&self) -> &str {
         match self.serialized {
@@ -44,15 +56,19 @@ impl<'a> BigNumber<'a> {
             Format::Haven(x) => Haven::get_exponent(x),
             Format::Scientific(x) => Scientific::get_exponent(x),
         };
-        if (exponent.is_ok()) {
-            let new_power = exponent.ok().unwrap() + increment;
-            if (new_power > (HAVEN_ABBREVIATIONS.len() * 3) as i32) {}
+        handle_analysis_errors!(exponent.is_err(), exponent);
+        let new_power = exponent.ok().unwrap() + increment;
+        if (new_power > (HAVEN_ABBREVIATIONS.len() * 3) as i32) {
+            let multiplier = Scientific::get_multiplier(self.get_value());
+            handle_analysis_errors!(multiplier.is_err(), multiplier);
+            self.serialized = Format::Scientific(
+                Scientific::create(multiplier.ok().unwrap(), new_power).as_str(),
+            );
         } else {
-            match exponent.err().unwrap() {
-                InvalidPrefix => {}
-                InvalidSuffix => {}
-                InvalidExponent => {}
-            }
+            let multiplier = Haven::get_multiplier(self.get_value());
+            handle_analysis_errors!(multiplier.is_err(), multiplier);
+            self.serialized =
+                Format::Haven(Haven::create(multiplier.ok().unwrap(), new_power).as_str());
         }
     }
     pub fn decrease_power(&self, increment: i32) {
@@ -68,6 +84,8 @@ enum AnalysisErrors {
 }
 trait NumberMethods {
     fn get_exponent(x: &str) -> Result<i32, AnalysisErrors>;
+    fn get_multiplier(x: &str) -> Result<i32, AnalysisErrors>;
+    fn create(a: i32, b: i32) -> String;
 }
 struct Haven;
 struct Scientific;
@@ -77,7 +95,7 @@ impl NumberMethods for Haven {
         let rest = x
             .chars()
             .rev()
-            .skip_while(|char| {
+            .take_while(|char| {
                 let is_alphabetic = char.is_ascii_alphabetic();
                 if (is_alphabetic) {
                     abbreviation.push(*char);
@@ -116,6 +134,23 @@ impl NumberMethods for Haven {
             }
         }
     }
+    fn get_multiplier(x: &str) -> Result<i32, AnalysisErrors> {
+        match x
+            .chars()
+            .take_while(|char| char.is_ascii_digit())
+            .collect::<String>()
+            .parse::<i32>()
+        {
+            Ok(number) => Ok(number),
+            Err(error) => Err(AnalysisErrors::InvalidPrefix),
+        }
+    }
+    fn create(a: i32, b: i32) -> String {
+        let mut serialized = String::new();
+        serialized.push_str(a.to_string().as_str());
+        serialized.push_str(HAVEN_ABBREVIATIONS[(b as f32 / 3.0).floor() as usize].unwrap());
+        serialized
+    }
 }
 impl NumberMethods for Scientific {
     fn get_exponent(x: &str) -> Result<i32, AnalysisErrors> {
@@ -129,5 +164,15 @@ impl NumberMethods for Scientific {
             Ok(number) => Ok(number),
             Err(error) => Err(AnalysisErrors::InvalidExponent),
         }
+    }
+    fn get_multiplier(x: &str) -> Result<i32, AnalysisErrors> {
+        Haven::get_multiplier(x)
+    }
+    fn create(a: i32, b: i32) -> String {
+        let mut serialized = String::new();
+        serialized.push_str(a.to_string().as_str());
+        serialized.push_str("x10^");
+        serialized.push_str(b.to_string().as_str());
+        serialized
     }
 }
