@@ -147,8 +147,14 @@ impl NumberMethods for Haven {
     }
     fn create(a: i32, b: i32) -> String {
         let mut serialized = String::new();
+        let abbreviation = HAVEN_ABBREVIATIONS[(b as f32 / 3.0).floor() as usize];
         serialized.push_str(a.to_string().as_str());
-        serialized.push_str(HAVEN_ABBREVIATIONS[(b as f32 / 3.0).floor() as usize].unwrap());
+        match abbreviation {
+            Some(x) => {
+                serialized.push_str(abbreviation.unwrap());
+            }
+            _ => {}
+        }
         serialized
     }
 }
