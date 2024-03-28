@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::iter::Scan;
 use std::ops::Add;
-use std::rc::Rc;
 
 use cooldown::*;
 use macroquad::color::Color;
@@ -146,16 +145,6 @@ fn create_ui(global_state: &mut AppState) {
                 0.0f32..1.0f32,
                 global_state.resolution_slider_value,
             );
-            if (ui.is_dragging()) {
-                let delta = mouse_delta_position();
-                unsafe {
-                    SETTINGS_POSITION = vec2(
-                        global_state.settings_position.x + delta.x,
-                        global_state.settings_position.y + delta.y,
-                    );
-                    global_state.settings_position = &mut SETTINGS_POSITION;
-                }
-            }
         });
 }
 fn update_resolution(global_state: &mut AppState) {
@@ -178,6 +167,7 @@ fn update_resolution(global_state: &mut AppState) {
 struct Camera {
     position: Vec2,
     number_distance: f32,
+    order_of_magnitude: f32,
 }
 impl Camera {
     fn new() -> Self {
@@ -189,6 +179,7 @@ impl Camera {
 }
 fn update_grid(camera: &Camera) {
     let origin_offset = camera.position;
+    let tl_corner = origin_offset.add((screen_width() / camera.number_distance) * );
 }
 #[macroquad::main("GRAPHING_CALCULATOR")]
 async fn main() {
@@ -227,7 +218,6 @@ async fn main() {
         if cooldown::job::is_on(&cooldown_storage, "fps") {
             GlobalState.current_fps = get_fps();
         }
-        update_dimensions();
         create_ui(&mut GlobalState);
         // Body Code
         let circle_radius = 150.0;
