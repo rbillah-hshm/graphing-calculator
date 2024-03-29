@@ -6,6 +6,7 @@ use std::f64::consts::PI;
 use std::iter::Scan;
 use std::ops::Add;
 
+use big_number::BigVec2;
 use cooldown::*;
 use macroquad::color::Color;
 use macroquad::miniquad::window::screen_size;
@@ -165,8 +166,8 @@ fn update_resolution(global_state: &mut AppState) {
     );
 }
 struct Camera {
-    position: Vec2,
-    number_distance: f32,
+    position: BigVec2,
+    number_distance: BigNumber,
     order_of_magnitude: f32,
 }
 impl Camera {
@@ -179,7 +180,7 @@ impl Camera {
 }
 fn update_grid(camera: &Camera) {
     let origin_offset = camera.position;
-    let tl_corner = origin_offset.add((screen_width() / camera.number_distance) * );
+    let tl_corner = origin_offset + BigVec2::new((camera.number_distance * 5.0), BigNumber::new());
 }
 #[macroquad::main("GRAPHING_CALCULATOR")]
 async fn main() {
