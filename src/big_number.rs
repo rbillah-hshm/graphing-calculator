@@ -32,8 +32,14 @@ fn reverse_number(a: i32, b: i32, c: i32) -> i32 {
 }
 fn cyclic_wrap(a: i32, b: i32, max: i32) -> f32 {
     println!("{a}, {b}");
-    println!("{}", (((a + b) % max) - a) as f32);
-    (10 as f32).powf((((a + b) % max) - a) as f32)
+    let modulo_of_sum = (a + b) % max;
+    Real::powf(
+        10.0,
+        match (modulo_of_sum != 0) {
+            true => modulo_of_sum,
+            false => max,
+        } as f32,
+    )
 }
 fn get_first_significant_figure(number: f32) -> f32 {
     number / Real::powf(10.0, number.log10())
@@ -90,21 +96,24 @@ impl BigNumber {
         Some(big_number)
     }
     pub fn new_d(deserialized: f32) -> BigNumber {
-        println!("{deserialized}");
         let mut temp = BigNumber {
             serialized: Format::Haven(("1").to_string()),
             base: 1.0,
             exponent: 0,
         };
+        if (deserialized as i32 == 0) {
+            return BigNumber {
+                serialized: Format::Haven(("0").to_string()),
+                base: 0.0,
+                exponent: 0,
+            };
+        }
         if (deserialized as i32 == 1) {
             return temp;
         }
         temp.increase_power(deserialized.log10().floor() as i32);
         match temp.serialized {
             Format::Haven(x) => {
-                println!("A");
-                println!("{}", deserialized.log10().floor());
-                println!("{}", deserialized.log10().floor() as i32);
                 let current_multiplier =
                     Haven::get_multiplier(x, deserialized.log10().floor() as i32);
                 temp.base = current_multiplier.ok().unwrap();
@@ -293,8 +302,11 @@ impl NumberMethods for Haven {
             .parse::<f32>()
         {
             Ok(number) => Ok((get_first_significant_figure(number)
-                * cyclic_wrap(((number as f32).log10().floor() as i32 + 1), exponent, 3))
-                as f32),
+                * cyclic_wrap(
+                    (((number as f32).log10() + 1.0).floor() as i32),
+                    exponent,
+                    3,
+                )) as f32),
             Err(error) => Err(AnalysisErrors::InvalidPrefix),
         }
     }
