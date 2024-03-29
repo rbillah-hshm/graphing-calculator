@@ -6,6 +6,7 @@ use std::f64::consts::PI;
 use std::iter::Scan;
 use std::ops::Add;
 
+use big_number::BigNumber;
 use big_number::BigVec2;
 use cooldown::*;
 use macroquad::color::Color;
@@ -167,20 +168,22 @@ fn update_resolution(global_state: &mut AppState) {
 }
 struct Camera {
     position: BigVec2,
-    number_distance: BigNumber,
-    order_of_magnitude: f32,
+    number_distance: f32,
 }
 impl Camera {
     fn new() -> Self {
         Camera {
-            position: vec2(0.0, 0.0),
+            position: BigVec2 {
+                x: BigNumber::new_d(0.0),
+                y: BigNumber::new_d(0.0),
+            },
             number_distance: screen_width() / 10.0,
         }
     }
 }
 fn update_grid(camera: &Camera) {
-    let origin_offset = camera.position;
-    let tl_corner = origin_offset + BigVec2::new((camera.number_distance * 5.0), BigNumber::new());
+    let origin_offset = camera.position.clone();
+    // let tl_corner = origin_offset + BigVec2::new((camera.number_distance * 5.0), BigNumber::new());
 }
 #[macroquad::main("GRAPHING_CALCULATOR")]
 async fn main() {
@@ -231,6 +234,7 @@ async fn main() {
         );
         circle_cache.push(circle);
         update_grid(&camera);
+        println!("{}", BigNumber::new_d(10008.0).get_value());
         // Code that must run at the end of the frame
         cooldown::job::update_next(&mut cooldown_storage);
         next_frame().await;

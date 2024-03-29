@@ -31,6 +31,8 @@ fn reverse_number(a: i32, b: i32, c: i32) -> i32 {
         .unwrap()
 }
 fn cyclic_wrap(a: i32, b: i32, max: i32) -> f32 {
+    println!("{a}, {b}");
+    println!("{}", (((a + b) % max) - a) as f32);
     (10 as f32).powf((((a + b) % max) - a) as f32)
 }
 fn get_first_significant_figure(number: f32) -> f32 {
@@ -43,7 +45,7 @@ pub enum Format {
 }
 #[derive(Clone)]
 pub struct BigNumber {
-    serialized: Format,
+    pub serialized: Format,
     base: f32,
     exponent: i32,
 }
@@ -60,37 +62,35 @@ macro_rules! handle_analysis_errors {
     };
 }
 impl BigNumber {
-    fn new(serialized: Format) -> Option<BigNumber> {
+    pub fn new(serialized: Format) -> Option<BigNumber> {
         let mut big_number = BigNumber::new_d(1.0);
         let inner = big_number.get_value();
         let exponent = match serialized {
-            Format::Haven(x) => Haven::get_exponent(inner),
-            Format::Scientific(x) => Scientific::get_exponent(inner),
-        };
-        handle_analysis_errors!(exponent.is_err(), exponent);
+            Format::Haven(_) => Haven::get_exponent(inner.clone()),
+            Format::Scientific(_) => Scientific::get_exponent(inner.clone()),
+        }
+        .ok()
+        .unwrap();
         let multiplier = match serialized {
-            Format::Haven(x) => Haven::get_multiplier(inner, exponent.ok().unwrap()),
-            Format::Scientific(x) => Scientific::get_multiplier(inner, exponent.ok().unwrap()),
+            Format::Haven(_) => Haven::get_multiplier(inner, exponent),
+            Format::Scientific(_) => Scientific::get_multiplier(inner, exponent),
         };
         handle_analysis_errors!(multiplier.is_err(), multiplier);
-        big_number.increase_power(exponent.ok().unwrap());
+        big_number.increase_power(exponent);
         match serialized {
-            Format::Haven(x) => {
-                big_number.serialized = Format::Haven(Haven::create(
-                    multiplier.ok().unwrap(),
-                    exponent.ok().unwrap(),
-                ));
+            Format::Haven(_) => {
+                big_number.serialized =
+                    Format::Haven(Haven::create(multiplier.ok().unwrap(), exponent));
             }
-            Format::Scientific(x) => {
-                big_number.serialized = Format::Scientific(Scientific::create(
-                    multiplier.ok().unwrap(),
-                    exponent.ok().unwrap(),
-                ));
+            Format::Scientific(_) => {
+                big_number.serialized =
+                    Format::Scientific(Scientific::create(multiplier.ok().unwrap(), exponent));
             }
         }
         Some(big_number)
     }
-    fn new_d(deserialized: f32) -> BigNumber {
+    pub fn new_d(deserialized: f32) -> BigNumber {
+        println!("{deserialized}");
         let mut temp = BigNumber {
             serialized: Format::Haven(("1").to_string()),
             base: 1.0,
@@ -102,11 +102,14 @@ impl BigNumber {
         temp.increase_power(deserialized.log10().floor() as i32);
         match temp.serialized {
             Format::Haven(x) => {
+                println!("A");
+                println!("{}", deserialized.log10().floor());
+                println!("{}", deserialized.log10().floor() as i32);
                 let current_multiplier =
                     Haven::get_multiplier(x, deserialized.log10().floor() as i32);
                 temp.base = current_multiplier.ok().unwrap();
                 temp.serialized = Format::Haven(Haven::create(
-                    current_multiplier.ok().unwrap(),
+                    temp.base,
                     deserialized.log10().floor() as i32,
                 ));
             }
@@ -115,7 +118,7 @@ impl BigNumber {
                     Scientific::get_multiplier(x, deserialized.log10().floor() as i32);
                 temp.base = current_multiplier.ok().unwrap();
                 temp.serialized = Format::Scientific(Scientific::create(
-                    current_multiplier.ok().unwrap(),
+                    temp.base,
                     deserialized.log10().floor() as i32,
                 ));
             }
@@ -140,8 +143,7 @@ impl BigNumber {
             handle_analysis_errors!(multiplier.is_err(), multiplier);
             self.base = multiplier.ok().unwrap() as f32;
             self.exponent = new_power;
-            self.serialized =
-                Format::Scientific(Scientific::create(multiplier.ok().unwrap(), new_power));
+            self.serialized = Format::Scientific(Scientific::create(self.base, new_power));
         } else {
             let multiplier = Haven::get_multiplier(self.get_value(), increment);
             handle_analysis_errors!(multiplier.is_err(), multiplier);
@@ -165,20 +167,22 @@ impl ops::Mul for BigNumber {
     fn mul(self, other: BigNumber) -> Self::Output {
         let mut product = self.clone();
         let product_exponent = match self.serialized {
-            Format::Haven(x) => Haven::get_exponent(self.get_value()),
-            Format::Scientific(x) => Scientific::get_exponent(self.get_value()),
+            Format::Haven(_) => Haven::get_exponent(self.get_value()),
+            Format::Scientific(_) => Scientific::get_exponent(self.get_value()),
         }
         .ok()
         .unwrap()
             + match other.serialized {
-                Format::Haven(x) => Haven::get_exponent(self.get_value()),
-                Format::Scientific(x) => Scientific::get_exponent(self.get_value()),
+                Format::Haven(_) => Haven::get_exponent(self.get_value()),
+                Format::Scientific(_) => Scientific::get_exponent(self.get_value()),
             }
             .ok()
             .unwrap();
         let multiplier = match self.serialized {
-            Format::Haven(x) => Haven::get_multiplier(x, product_exponent),
-            Format::Scientific(x) => Scientific::get_multiplier(x, product_exponent),
+            Format::Haven(ref x) => Haven::get_multiplier(x.to_string(), product_exponent),
+            Format::Scientific(ref x) => {
+                Scientific::get_multiplier(x.to_string(), product_exponent)
+            }
         }
         .ok()
         .unwrap()
@@ -188,15 +192,37 @@ impl ops::Mul for BigNumber {
             }
             .ok()
             .unwrap();
+        let mut new_multiplier: f32 = 0.0;
         match self.serialized {
-            Format::Haven(x) => {
-                let original_multiplier = Haven::get_multiplier(x, product_exponent);
+            Format::Haven(ref x) => {
+                let original_multiplier = Haven::get_multiplier(x.to_string(), product_exponent);
+                let difference =
+                    original_multiplier.ok().unwrap().log10().floor() - multiplier.log10().floor();
+                new_multiplier = get_first_significant_figure(multiplier)
+                    * cyclic_wrap(multiplier.log10().floor() as i32 + 1, difference as i32, 3);
+                product.increase_power(difference as i32);
+                ()
             }
-            Format::Scientific(x) => {
-                let original_multiplier = Scientific::get_multiplier(x, product_exponent);
+            Format::Scientific(ref x) => {
+                let original_multiplier =
+                    Scientific::get_multiplier(x.to_string(), product_exponent);
+                let difference =
+                    original_multiplier.ok().unwrap().log10().floor() - multiplier.log10().floor();
+                new_multiplier = multiplier / Real::powf(10.0, difference);
+                product.increase_power(difference as i32);
+                ()
             }
         }
         product.increase_power(product_exponent);
+        match self.serialized {
+            Format::Haven(_) => {
+                product.serialized = Format::Haven(Haven::create(new_multiplier, self.exponent));
+            }
+            Format::Scientific(_) => {
+                product.serialized =
+                    Format::Scientific(Scientific::create(new_multiplier, self.exponent));
+            }
+        }
         product
     }
 }
@@ -309,7 +335,8 @@ impl NumberMethods for Scientific {
         serialized
     }
 }
+#[derive(Clone)]
 pub struct BigVec2 {
-    x: BigNumber,
-    y: BigNumber,
+    pub x: BigNumber,
+    pub y: BigNumber,
 }
