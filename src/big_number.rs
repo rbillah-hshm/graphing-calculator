@@ -200,22 +200,21 @@ impl ops::Mul for BigNumber {
     fn mul(self, other: BigNumber) -> Self::Output {
         let mut product = self.clone();
         let multiplier = match product.serialized {
-            Format::Haven(ref x) => Haven::get_multiplier(x.to_string(), product.exponent)
-                .ok()
-                .unwrap(),
+            Format::Haven(ref x) => Haven::get_multiplier(x.to_string(), product.exponent),
             Format::Scientific(ref x) => {
                 Scientific::get_multiplier(x.to_string(), product.exponent)
-                    .ok()
-                    .unwrap()
             }
-        } * match other.serialized {
-            Format::Haven(ref x) => Haven::get_multiplier(x.to_string(), other.exponent)
-                .ok()
-                .unwrap(),
-            Format::Scientific(ref x) => Scientific::get_multiplier(x.to_string(), other.exponent)
-                .ok()
-                .unwrap(),
-        };
+        }
+        .ok()
+        .unwrap()
+            * match other.serialized {
+                Format::Haven(ref x) => Haven::get_multiplier(x.to_string(), other.exponent),
+                Format::Scientific(ref x) => {
+                    Scientific::get_multiplier(x.to_string(), other.exponent)
+                }
+            }
+            .ok()
+            .unwrap();
         let mut new_multiplier: f32 = 0.0;
         match product.serialized {
             Format::Haven(ref x) => {
