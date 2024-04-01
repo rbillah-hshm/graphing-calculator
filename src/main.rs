@@ -234,7 +234,7 @@ async fn main() {
         );
         circle_cache.push(circle);
         update_grid(&camera);
-        println!("{}", BigNumber::new_d(10008.0).get_value());
+        println!("{}, lol", (BigNumber::new_d(5.0) * 400000.0).get_value());
         // Code that must run at the end of the frame
         cooldown::job::update_next(&mut cooldown_storage);
         next_frame().await;

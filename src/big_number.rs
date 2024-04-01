@@ -1,10 +1,11 @@
 use itertools::Dedup;
 use macroquad::experimental::scene::HandleUntyped;
-use num::{complex::ComplexFloat, traits::real::Real, Float};
-use std::{
-    ops::{self, BitAndAssign},
-    os::windows::io::HandleOrNull,
+use num::{
+    complex::ComplexFloat,
+    traits::{real::Real, Pow},
+    Float,
 };
+use std::ops::{self, BitAndAssign};
 const HAVEN_ABBREVIATIONS: [Option<&str>; 9] = [
     None,
     Some("K"),
@@ -28,10 +29,9 @@ fn reverse_number(a: i32, b: i32, c: i32) -> i32 {
         .rev()
         .collect::<Vec<i32>>()
         .get((c - a) as usize)
-        .unwrap()
+        .unwrap_or(&0)
 }
 fn cyclic_wrap(a: i32, b: i32, max: i32) -> f32 {
-    println!("{a}, {b}");
     let modulo_of_sum = (a + b) % max;
     Real::powf(
         10.0,
@@ -41,8 +41,17 @@ fn cyclic_wrap(a: i32, b: i32, max: i32) -> f32 {
         } as f32,
     )
 }
+fn exponential_modulo_ten(a: f32, b: f32) -> i32 {
+    let modulus = (a.log10().floor() - b.log10().floor()) % 3.0;
+    let map = match modulus as i32 {
+        0 => 0,
+        1 => 1,
+        _ => -1,
+    };
+    map
+}
 fn get_first_significant_figure(number: f32) -> f32 {
-    number / Real::powf(10.0, number.log10())
+    number / Real::powf(10.0, number.log10().floor())
 }
 #[derive(Clone)]
 pub enum Format {
@@ -52,16 +61,22 @@ pub enum Format {
 #[derive(Clone)]
 pub struct BigNumber {
     pub serialized: Format,
-    base: f32,
-    exponent: i32,
+    pub base: f32,
+    pub exponent: i32,
 }
 macro_rules! handle_analysis_errors {
     ($condition:expr, $error:expr) => {
         if ($condition) {
             match $error.err().unwrap() {
-                AnalysisErrors::InvalidPrefix => {}
-                AnalysisErrors::InvalidSuffix => {}
-                AnalysisErrors::InvalidExponent => {}
+                AnalysisErrors::InvalidPrefix => {
+                    println!("BRO");
+                }
+                AnalysisErrors::InvalidSuffix => {
+                    println!("BRUH");
+                }
+                AnalysisErrors::InvalidExponent => {
+                    println!("DUDE");
+                }
             }
             return None;
         }
@@ -86,41 +101,46 @@ impl BigNumber {
         match serialized {
             Format::Haven(_) => {
                 big_number.serialized =
-                    Format::Haven(Haven::create(multiplier.ok().unwrap(), exponent));
+                    Format::Haven(Haven::create(multiplier.ok().unwrap(), exponent, false));
             }
             Format::Scientific(_) => {
-                big_number.serialized =
-                    Format::Scientific(Scientific::create(multiplier.ok().unwrap(), exponent));
+                big_number.serialized = Format::Scientific(Scientific::create(
+                    multiplier.ok().unwrap(),
+                    exponent,
+                    false,
+                ));
             }
         }
         Some(big_number)
     }
     pub fn new_d(deserialized: f32) -> BigNumber {
         let mut temp = BigNumber {
-            serialized: Format::Haven(("1").to_string()),
+            serialized: Format::Haven(("1.0").to_string()),
             base: 1.0,
-            exponent: 0,
+            exponent: deserialized.log10().floor() as i32,
         };
         if (deserialized as i32 == 0) {
             return BigNumber {
-                serialized: Format::Haven(("0").to_string()),
+                serialized: Format::Haven(("0.0").to_string()),
                 base: 0.0,
                 exponent: 0,
             };
         }
-        if (deserialized as i32 == 1) {
-            return temp;
+        if (deserialized < 10.0) {
+            return BigNumber {
+                serialized: Format::Haven((deserialized as f32).to_string()),
+                base: deserialized,
+                exponent: 0,
+            };
         }
-        temp.increase_power(deserialized.log10().floor() as i32);
+        temp.increase_power(deserialized.log10().floor() as i32 - 1 as i32);
         match temp.serialized {
             Format::Haven(x) => {
                 let current_multiplier =
                     Haven::get_multiplier(x, deserialized.log10().floor() as i32);
-                temp.base = current_multiplier.ok().unwrap();
-                temp.serialized = Format::Haven(Haven::create(
-                    temp.base,
-                    deserialized.log10().floor() as i32,
-                ));
+                temp.base = get_first_significant_figure(deserialized);
+                temp.serialized =
+                    Format::Haven(Haven::create(temp.base, temp.exponent as i32, false));
             }
             Format::Scientific(x) => {
                 let current_multiplier =
@@ -129,6 +149,7 @@ impl BigNumber {
                 temp.serialized = Format::Scientific(Scientific::create(
                     temp.base,
                     deserialized.log10().floor() as i32,
+                    false,
                 ));
             }
         }
@@ -141,6 +162,9 @@ impl BigNumber {
         }
     }
     pub fn increase_power(&mut self, increment: i32) -> Option<bool> {
+        if (increment == 0) {
+            return Some(true);
+        }
         let exponent = match self.serialized.clone() {
             Format::Haven(x) => Haven::get_exponent(x),
             Format::Scientific(x) => Scientific::get_exponent(x),
@@ -150,13 +174,13 @@ impl BigNumber {
         if (new_power > (HAVEN_ABBREVIATIONS.len() * 3) as i32) {
             let multiplier = Scientific::get_multiplier(self.get_value(), increment);
             handle_analysis_errors!(multiplier.is_err(), multiplier);
-            self.base = multiplier.ok().unwrap() as f32;
             self.exponent = new_power;
-            self.serialized = Format::Scientific(Scientific::create(self.base, new_power));
+            self.serialized = Format::Scientific(Scientific::create(self.base, new_power, false));
         } else {
-            let multiplier = Haven::get_multiplier(self.get_value(), increment);
+            let multiplier = Haven::get_multiplier(self.get_value(), new_power);
             handle_analysis_errors!(multiplier.is_err(), multiplier);
-            self.serialized = Format::Haven(Haven::create(multiplier.ok().unwrap(), new_power));
+            self.exponent = new_power;
+            self.serialized = Format::Haven(Haven::create(self.base, new_power, false));
         }
         Some(true)
     }
@@ -175,61 +199,69 @@ impl ops::Mul for BigNumber {
     type Output = BigNumber;
     fn mul(self, other: BigNumber) -> Self::Output {
         let mut product = self.clone();
-        let product_exponent = match self.serialized {
-            Format::Haven(_) => Haven::get_exponent(self.get_value()),
-            Format::Scientific(_) => Scientific::get_exponent(self.get_value()),
-        }
-        .ok()
-        .unwrap()
-            + match other.serialized {
-                Format::Haven(_) => Haven::get_exponent(self.get_value()),
-                Format::Scientific(_) => Scientific::get_exponent(self.get_value()),
-            }
-            .ok()
-            .unwrap();
-        let multiplier = match self.serialized {
-            Format::Haven(ref x) => Haven::get_multiplier(x.to_string(), product_exponent),
+        let multiplier = match product.serialized {
+            Format::Haven(ref x) => Haven::get_multiplier(x.to_string(), product.exponent)
+                .ok()
+                .unwrap(),
             Format::Scientific(ref x) => {
-                Scientific::get_multiplier(x.to_string(), product_exponent)
+                Scientific::get_multiplier(x.to_string(), product.exponent)
+                    .ok()
+                    .unwrap()
             }
-        }
-        .ok()
-        .unwrap()
-            * match other.serialized {
-                Format::Haven(x) => Haven::get_multiplier(x, product_exponent),
-                Format::Scientific(x) => Scientific::get_multiplier(x, product_exponent),
-            }
-            .ok()
-            .unwrap();
+        } * match other.serialized {
+            Format::Haven(ref x) => Haven::get_multiplier(x.to_string(), other.exponent)
+                .ok()
+                .unwrap(),
+            Format::Scientific(ref x) => Scientific::get_multiplier(x.to_string(), other.exponent)
+                .ok()
+                .unwrap(),
+        };
         let mut new_multiplier: f32 = 0.0;
-        match self.serialized {
+        match product.serialized {
             Format::Haven(ref x) => {
-                let original_multiplier = Haven::get_multiplier(x.to_string(), product_exponent);
-                let difference =
-                    original_multiplier.ok().unwrap().log10().floor() - multiplier.log10().floor();
-                new_multiplier = get_first_significant_figure(multiplier)
-                    * cyclic_wrap(multiplier.log10().floor() as i32 + 1, difference as i32, 3);
+                let original_multiplier = Haven::get_multiplier(x.to_string(), product.exponent);
+                let unwrapped_multiplier = original_multiplier.ok().unwrap();
+                let difference = multiplier.log10().floor() - unwrapped_multiplier.log10().floor();
+                let factor = (10 as i32).pow(match exponential_modulo_ten(
+                    multiplier,
+                    unwrapped_multiplier,
+                ) {
+                    x => {
+                        let mut result = (unwrapped_multiplier).log10().floor() as i32 + x;
+                        let is_less_than = result < 0;
+                        let is_greater_than = result > 2;
+                        if (is_greater_than) {
+                            result = 0;
+                        } else if (is_less_than) {
+                            result = 2;
+                        };
+                        result
+                    }
+                } as u32);
+                new_multiplier =
+                    get_first_significant_figure(unwrapped_multiplier * other.base) * factor as f32;
                 product.increase_power(difference as i32);
                 ()
             }
             Format::Scientific(ref x) => {
                 let original_multiplier =
-                    Scientific::get_multiplier(x.to_string(), product_exponent);
+                    Scientific::get_multiplier(x.to_string(), product.exponent);
                 let difference =
-                    original_multiplier.ok().unwrap().log10().floor() - multiplier.log10().floor();
+                    multiplier.log10().floor() - original_multiplier.ok().unwrap().log10().floor();
                 new_multiplier = multiplier / Real::powf(10.0, difference);
                 product.increase_power(difference as i32);
                 ()
             }
         }
-        product.increase_power(product_exponent);
-        match self.serialized {
+        product.increase_power(other.exponent + 2);
+        match product.serialized {
             Format::Haven(_) => {
-                product.serialized = Format::Haven(Haven::create(new_multiplier, self.exponent));
+                product.serialized =
+                    Format::Haven(Haven::create(new_multiplier, product.exponent, true));
             }
             Format::Scientific(_) => {
                 product.serialized =
-                    Format::Scientific(Scientific::create(new_multiplier, self.exponent));
+                    Format::Scientific(Scientific::create(new_multiplier, product.exponent, true));
             }
         }
         product
@@ -245,17 +277,17 @@ enum AnalysisErrors {
 trait NumberMethods {
     fn get_exponent(x: String) -> Result<i32, AnalysisErrors>;
     fn get_multiplier(x: String, exponent: i32) -> Result<f32, AnalysisErrors>;
-    fn create(a: f32, b: i32) -> String;
+    fn create(a: f32, b: i32, is_product: bool) -> String;
 }
 struct Haven;
 struct Scientific;
 impl NumberMethods for Haven {
     fn get_exponent(x: String) -> Result<i32, AnalysisErrors> {
         let mut abbreviation = String::new();
-        let rest = x
+        let mut rest = x
             .chars()
             .rev()
-            .take_while(|char| {
+            .skip_while(|char| {
                 let is_alphabetic = char.is_ascii_alphabetic();
                 if (is_alphabetic) {
                     abbreviation.push(*char);
@@ -263,19 +295,23 @@ impl NumberMethods for Haven {
                 is_alphabetic
             })
             .collect::<String>();
+        rest = rest.chars().rev().collect::<String>();
         if (abbreviation.is_empty()) {
-            let num = x.parse::<i32>();
+            let num = x.parse::<f32>();
             let unwrapped = match num {
                 Ok(n) => n,
-                Err(error) => -1,
+                Err(error) => -1.0,
             };
-            if (!bool_from_number(unwrapped)) {
+            if (!bool_from_number(unwrapped as i32)) {
                 return Err(AnalysisErrors::InvalidPrefix);
             }
             return Ok(((unwrapped as f32).log10().floor() + 1.0) as i32);
         } else {
             let mut position = None;
             for (index, suffix) in HAVEN_ABBREVIATIONS.iter().enumerate() {
+                if (index == 0) {
+                    continue;
+                }
                 if (*suffix.unwrap() == abbreviation) {
                     position = Some(index);
                     break;
@@ -286,9 +322,10 @@ impl NumberMethods for Haven {
                 if (parsed_rest.is_err()) {
                     return Err(AnalysisErrors::InvalidPrefix);
                 }
+                let result = parsed_rest.ok().unwrap().log10().floor();
                 return Ok(((position.unwrap() as i32 * 3 as i32)
-                    - reverse_number(1, 3, parsed_rest.ok().unwrap().log10().floor() as i32))
-                    + 1);
+                    - reverse_number(1, 3, result as i32)
+                    + 1));
             } else {
                 return Err(AnalysisErrors::InvalidSuffix);
             }
@@ -301,19 +338,26 @@ impl NumberMethods for Haven {
             .collect::<String>()
             .parse::<f32>()
         {
-            Ok(number) => Ok((get_first_significant_figure(number)
-                * cyclic_wrap(
-                    (((number as f32).log10() + 1.0).floor() as i32),
-                    exponent,
-                    3,
-                )) as f32),
+            Ok(number) => match (number < 1000.0) {
+                true => Ok(number),
+                false => Ok(get_first_significant_figure(number)
+                    * (cyclic_wrap((((number).log10() + 1.0).floor() as i32), exponent, 3)) as f32),
+            },
             Err(error) => Err(AnalysisErrors::InvalidPrefix),
         }
     }
-    fn create(a: f32, b: i32) -> String {
+    fn create(a: f32, b: i32, is_product: bool) -> String {
         let mut serialized = String::new();
         let abbreviation = HAVEN_ABBREVIATIONS[(b as f32 / 3.0).floor() as usize];
-        serialized.push_str(a.to_string().as_str());
+        if (is_product) {
+            serialized.push_str(a.to_string().as_str());
+        } else {
+            serialized.push_str(
+                (get_first_significant_figure(a) * Real::powi(10.0, (b) % 3))
+                    .to_string()
+                    .as_str(),
+            );
+        }
         match abbreviation {
             Some(x) => {
                 serialized.push_str(abbreviation.unwrap());
@@ -339,7 +383,7 @@ impl NumberMethods for Scientific {
     fn get_multiplier(x: String, exponent: i32) -> Result<f32, AnalysisErrors> {
         Haven::get_multiplier(x, exponent)
     }
-    fn create(a: f32, b: i32) -> String {
+    fn create(a: f32, b: i32, is_product: bool) -> String {
         let mut serialized = String::new();
         serialized.push_str(a.to_string().as_str());
         serialized.push_str("x10^");
