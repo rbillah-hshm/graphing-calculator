@@ -117,7 +117,7 @@ impl BigNumber {
         let mut temp = BigNumber {
             serialized: Format::Haven(("1.0").to_string()),
             base: 1.0,
-            exponent: deserialized.log10().floor() as i32,
+            exponent: 0,
         };
         if (deserialized as i32 == 0) {
             return BigNumber {
@@ -133,11 +133,9 @@ impl BigNumber {
                 exponent: 0,
             };
         }
-        temp.increase_power(deserialized.log10().floor() as i32 - 1 as i32);
+        temp.increase_power(deserialized.log10().floor() as i32);
         match temp.serialized {
             Format::Haven(x) => {
-                let current_multiplier =
-                    Haven::get_multiplier(x, deserialized.log10().floor() as i32);
                 temp.base = get_first_significant_figure(deserialized);
                 temp.serialized =
                     Format::Haven(Haven::create(temp.base, temp.exponent as i32, false));
@@ -239,7 +237,6 @@ impl ops::Mul for BigNumber {
                 } as u32);
                 new_multiplier =
                     get_first_significant_figure(unwrapped_multiplier * other.base) * factor as f32;
-                product.increase_power(difference as i32);
                 ()
             }
             Format::Scientific(ref x) => {
@@ -247,12 +244,11 @@ impl ops::Mul for BigNumber {
                     Scientific::get_multiplier(x.to_string(), product.exponent);
                 let difference =
                     multiplier.log10().floor() - original_multiplier.ok().unwrap().log10().floor();
-                new_multiplier = multiplier / Real::powf(10.0, difference);
-                product.increase_power(difference as i32);
+                new_multiplier = get_first_significant_figure(multiplier);
                 ()
             }
         }
-        product.increase_power(other.exponent + 2);
+        product.increase_power(other.exponent);
         match product.serialized {
             Format::Haven(_) => {
                 product.serialized =
@@ -304,7 +300,7 @@ impl NumberMethods for Haven {
             if (!bool_from_number(unwrapped as i32)) {
                 return Err(AnalysisErrors::InvalidPrefix);
             }
-            return Ok(((unwrapped as f32).log10().floor() + 1.0) as i32);
+            return Ok(((unwrapped as f32).log10().floor()) as i32);
         } else {
             let mut position = None;
             for (index, suffix) in HAVEN_ABBREVIATIONS.iter().enumerate() {
@@ -340,7 +336,7 @@ impl NumberMethods for Haven {
             Ok(number) => match (number < 1000.0) {
                 true => Ok(number),
                 false => Ok(get_first_significant_figure(number)
-                    * (cyclic_wrap((((number).log10() + 1.0).floor() as i32), exponent, 3)) as f32),
+                    * (cyclic_wrap((((number).log10()).floor() as i32), exponent, 3)) as f32),
             },
             Err(error) => Err(AnalysisErrors::InvalidPrefix),
         }
@@ -352,7 +348,7 @@ impl NumberMethods for Haven {
             serialized.push_str(a.to_string().as_str());
         } else {
             serialized.push_str(
-                (get_first_significant_figure(a) * Real::powi(10.0, (b) % 3))
+                (get_first_significant_figure(a) * Real::powi(10.0, b % 3))
                     .to_string()
                     .as_str(),
             );
