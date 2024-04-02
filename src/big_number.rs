@@ -199,17 +199,13 @@ impl ops::Mul for BigNumber {
         let mut product = self.clone();
         let multiplier = match product.serialized {
             Format::Haven(ref x) => Haven::get_multiplier(x.to_string(), product.exponent),
-            Format::Scientific(ref x) => {
-                Scientific::get_multiplier(x.to_string(), product.exponent)
-            }
+            Format::Scientific(ref x) => Ok(product.base),
         }
         .ok()
         .unwrap()
             * match other.serialized {
                 Format::Haven(ref x) => Haven::get_multiplier(x.to_string(), other.exponent),
-                Format::Scientific(ref x) => {
-                    Scientific::get_multiplier(x.to_string(), other.exponent)
-                }
+                Format::Scientific(ref x) => Ok(other.base),
             }
             .ok()
             .unwrap();
@@ -240,11 +236,14 @@ impl ops::Mul for BigNumber {
                 ()
             }
             Format::Scientific(ref x) => {
-                let original_multiplier =
-                    Scientific::get_multiplier(x.to_string(), product.exponent);
-                let difference =
-                    multiplier.log10().floor() - original_multiplier.ok().unwrap().log10().floor();
                 new_multiplier = get_first_significant_figure(multiplier);
+                let change = (get_first_significant_figure(self.base)
+                    * get_first_significant_figure(other.base))
+                .log10()
+                .floor();
+                if (change == 1.0) {
+                    product.increase_power(change as i32);
+                }
                 ()
             }
         }
@@ -290,6 +289,7 @@ impl NumberMethods for Haven {
                 is_alphabetic
             })
             .collect::<String>();
+        abbreviation = abbreviation.chars().rev().collect::<String>();
         rest = rest.chars().rev().collect::<String>();
         if (abbreviation.is_empty()) {
             let num = x.parse::<f32>();
@@ -364,11 +364,12 @@ impl NumberMethods for Haven {
 }
 impl NumberMethods for Scientific {
     fn get_exponent(x: String) -> Result<i32, AnalysisErrors> {
-        let exponent = x
+        let mut exponent = x
             .chars()
             .rev()
             .take_while(|char| char.is_ascii_digit())
             .collect::<String>();
+        exponent = exponent.chars().rev().collect::<String>();
         let parsed_exponent = exponent.parse::<i32>();
         match parsed_exponent {
             Ok(number) => Ok(number),
@@ -380,7 +381,7 @@ impl NumberMethods for Scientific {
     }
     fn create(a: f32, b: i32, is_product: bool) -> String {
         let mut serialized = String::new();
-        serialized.push_str(a.to_string().as_str());
+        serialized.push_str(get_first_significant_figure(a).to_string().as_str());
         serialized.push_str("x10^");
         serialized.push_str(b.to_string().as_str());
         serialized
