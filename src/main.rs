@@ -239,6 +239,10 @@ async fn main() {
             (BigNumber::new_d(5000000.0) * 500000.0 * 5000000.0 * 500000000.0 * 10000.0)
                 .get_value()
         );
+        println!(
+            "{}, afk",
+            (BigNumber::new_d(0.05) + BigNumber::new_d(0.8)).get_value()
+        );
         // Code that must run at the end of the frame
         cooldown::job::update_next(&mut cooldown_storage);
         next_frame().await;

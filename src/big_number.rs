@@ -2,10 +2,13 @@ use itertools::Dedup;
 use macroquad::experimental::scene::HandleUntyped;
 use num::{
     complex::ComplexFloat,
-    traits::{real::Real, Pow},
+    traits::{float::FloatCore, real::Real, Pow},
     Float,
 };
-use std::ops::{self, BitAndAssign};
+use std::{
+    cmp,
+    ops::{self, BitAndAssign},
+};
 const HAVEN_ABBREVIATIONS: [Option<&str>; 9] = [
     None,
     Some("K"),
@@ -22,6 +25,12 @@ fn bool_from_number(number: i32) -> bool {
         -1 => false,
         0 => false,
         _ => true,
+    }
+}
+fn sign_from_bool(boolean: bool) -> i32 {
+    match boolean {
+        false => -1,
+        true => 1,
     }
 }
 fn reverse_number(a: i32, b: i32, c: i32) -> i32 {
@@ -53,6 +62,9 @@ fn exponential_modulo_ten(a: f32, b: f32) -> i32 {
 fn get_first_significant_figure(number: f32) -> f32 {
     number / Real::powf(10.0, number.log10().floor())
 }
+fn is_between_integers(a: f32, b: i32, c: i32) -> bool {
+    (a > b as f32) && (a < c as f32)
+}
 #[derive(Clone)]
 pub enum Format {
     Haven(String),
@@ -63,6 +75,7 @@ pub struct BigNumber {
     pub serialized: Format,
     pub base: f32,
     pub exponent: i32,
+    pub is_positive: bool,
 }
 macro_rules! handle_analysis_errors {
     ($condition:expr, $error:expr) => {
@@ -97,7 +110,7 @@ impl BigNumber {
             Format::Scientific(_) => Scientific::get_multiplier(inner, exponent),
         };
         handle_analysis_errors!(multiplier.is_err(), multiplier);
-        big_number.increase_power(exponent);
+        big_number.increase_power(exponent, false);
         match serialized {
             Format::Haven(_) => {
                 big_number.serialized =
@@ -114,39 +127,53 @@ impl BigNumber {
         Some(big_number)
     }
     pub fn new_d(deserialized: f32) -> BigNumber {
+        let positive_deserialized = deserialized.abs();
         let mut temp = BigNumber {
             serialized: Format::Haven(("1.0").to_string()),
             base: 1.0,
             exponent: 0,
+            is_positive: (deserialized >= 0.0),
         };
-        if (deserialized as i32 == 0) {
+        if (deserialized == 0.0) {
             return BigNumber {
                 serialized: Format::Haven(("0.0").to_string()),
                 base: 0.0,
                 exponent: 0,
+                ..Default::default()
             };
         }
-        if (deserialized < 10.0) {
+        if (is_between_integers(positive_deserialized, 0, 1)) {
+            let base = get_first_significant_figure(positive_deserialized);
+            let exponent = -((1.0 / positive_deserialized).log10().floor()) as i32;
             return BigNumber {
-                serialized: Format::Haven((deserialized as f32).to_string()),
-                base: deserialized,
-                exponent: 0,
+                serialized: Format::Scientific(Scientific::create(base, exponent, false)),
+                base,
+                exponent,
+                is_positive: (deserialized >= 0.0),
             };
         }
-        temp.increase_power(deserialized.log10().floor() as i32);
+        if (positive_deserialized < 10.0) {
+            return BigNumber {
+                serialized: Format::Haven((positive_deserialized as f32).to_string()),
+                base: positive_deserialized,
+                exponent: 0,
+                is_positive: (deserialized >= 0.0),
+            };
+        }
+        temp.increase_power(positive_deserialized.log10().floor() as i32, false);
         match temp.serialized {
             Format::Haven(x) => {
-                temp.base = get_first_significant_figure(deserialized);
+                temp.base = get_first_significant_figure(positive_deserialized);
                 temp.serialized =
                     Format::Haven(Haven::create(temp.base, temp.exponent as i32, false));
             }
             Format::Scientific(x) => {
                 let current_multiplier =
-                    Scientific::get_multiplier(x, deserialized.log10().floor() as i32);
+                    Scientific::get_multiplier(x, positive_deserialized.log10().floor() as i32);
                 temp.base = current_multiplier.ok().unwrap();
                 temp.serialized = Format::Scientific(Scientific::create(
                     temp.base,
-                    deserialized.log10().floor() as i32,
+                    positive_deserialized.log10().floor() as i32,
                     false,
                 ));
             }
@@ -159,7 +186,7 @@ impl BigNumber {
             Format::Scientific(x) => x,
         }
     }
-    pub fn increase_power(&mut self, increment: i32) -> Option<bool> {
+    pub fn increase_power(&mut self, increment: i32, is_bounce: bool) -> Option<bool> {
         if (increment == 0) {
             return Some(true);
         }
@@ -168,7 +195,10 @@ impl BigNumber {
             Format::Scientific(x) => Scientific::get_exponent(x),
         };
         handle_analysis_errors!(exponent.is_err(), exponent);
-        let new_power = exponent.ok().unwrap() + increment;
+        let new_power = match (is_bounce && (self.exponent + increment) < 0) {
+            false => exponent.ok().unwrap() + increment,
+            true => (self.exponent + increment).abs(),
+        };
         if (new_power > (HAVEN_ABBREVIATIONS.len() * 3) as i32) {
             let multiplier = Scientific::get_multiplier(self.get_value(), increment);
             handle_analysis_errors!(multiplier.is_err(), multiplier);
@@ -183,7 +213,66 @@ impl BigNumber {
         Some(true)
     }
     pub fn decrease_power(&mut self, increment: i32) -> Option<bool> {
-        self.increase_power(-increment)
+        self.increase_power(-increment, false)
+    }
+}
+impl Default for BigNumber {
+    fn default() -> Self {
+        BigNumber {
+            serialized: Format::Haven("1.0".to_string()),
+            base: 1.0,
+            exponent: 0,
+            is_positive: true,
+        }
+    }
+}
+impl ops::Add<f32> for BigNumber {
+    type Output = BigNumber;
+    fn add(self, rhs: f32) -> BigNumber {
+        let big_version = BigNumber::new_d(rhs);
+        self + big_version
+    }
+}
+impl ops::Add for BigNumber {
+    type Output = BigNumber;
+    fn add(self, other: BigNumber) -> BigNumber {
+        let mut sum = self.clone();
+        let base_delta = other.base / Real::powi(10.0, (sum.exponent - other.exponent)) as f32;
+        let new_base = (sum.base * sign_from_bool(sum.is_positive) as f32)
+            + (sign_from_bool(other.is_positive) as f32 * base_delta);
+        if (new_base.floor() - sum.base.floor()).abs() > 0.0 {
+            let is_bounce = (new_base < 0.0);
+            let exponent_difference = (new_base.log10().floor() - sum.base.log10().floor()).abs();
+            let reverse_difference =
+                sign_from_bool((new_base.log10() - f32::max(sum.base, base_delta).log10()) > 1.0);
+            if (is_bounce) {
+                sum.is_positive = false;
+            }
+            sum.increase_power(
+                reverse_difference
+                    * match exponent_difference as i32 * sign_from_bool(other.is_positive) {
+                        x => {
+                            if x > 0 {
+                                x + 1
+                            } else {
+                                x - 1
+                            }
+                        }
+                    },
+                is_bounce,
+            );
+        }
+        sum.base = get_first_significant_figure(new_base.abs());
+        match sum.serialized {
+            Format::Haven(_) => {
+                sum.serialized = Format::Haven(Haven::create(sum.base, sum.exponent, false));
+            }
+            Format::Scientific(_) => {
+                sum.serialized =
+                    Format::Scientific(Scientific::create(sum.base, sum.exponent, false));
+            }
+        }
+        sum
     }
 }
 impl ops::Mul<f32> for BigNumber {
@@ -242,12 +331,12 @@ impl ops::Mul for BigNumber {
                 .log10()
                 .floor();
                 if (change == 1.0) {
-                    product.increase_power(change as i32);
+                    product.increase_power(change as i32, false);
                 }
                 ()
             }
         }
-        product.increase_power(other.exponent);
+        product.increase_power(other.exponent, false);
         match product.serialized {
             Format::Haven(_) => {
                 product.serialized =
@@ -258,6 +347,9 @@ impl ops::Mul for BigNumber {
                     Format::Scientific(Scientific::create(new_multiplier, product.exponent, true));
             }
         }
+        product.is_positive = bool_from_number(
+            sign_from_bool(product.is_positive) * sign_from_bool(other.is_positive),
+        );
         product
     }
 }
