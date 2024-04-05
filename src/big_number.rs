@@ -2,11 +2,15 @@ use itertools::Dedup;
 use macroquad::experimental::scene::HandleUntyped;
 use num::{
     complex::ComplexFloat,
-    traits::{float::FloatCore, real::Real, Pow},
+    traits::{
+        float::{FloatCore, TotalOrder},
+        real::Real,
+        Pow,
+    },
     Float,
 };
 use std::{
-    cmp,
+    cmp::{self, Ordering},
     ops::{self, BitAndAssign},
 };
 const HAVEN_ABBREVIATIONS: [Option<&str>; 9] = [
@@ -144,7 +148,7 @@ impl BigNumber {
         }
         if (is_between_integers(positive_deserialized, 0, 1)) {
             let base = get_first_significant_figure(positive_deserialized);
-            let exponent = -((1.0 / positive_deserialized).log10().floor()) as i32;
+            let exponent = -((1.0 / positive_deserialized).log10().ceil()) as i32;
             return BigNumber {
                 serialized: Format::Scientific(Scientific::create(base, exponent, false)),
                 base,
@@ -195,11 +199,16 @@ impl BigNumber {
             Format::Scientific(x) => Scientific::get_exponent(x),
         };
         handle_analysis_errors!(exponent.is_err(), exponent);
+        let mut flag = false;
         let new_power = match (is_bounce && (self.exponent + increment) < 0) {
             false => exponent.ok().unwrap() + increment,
-            true => (self.exponent + increment).abs(),
+            true => {
+                flag = true;
+                println!("flag updated");
+                (self.exponent + increment).abs()
+            }
         };
-        if (new_power > (HAVEN_ABBREVIATIONS.len() * 3) as i32) {
+        if ((new_power > (HAVEN_ABBREVIATIONS.len() * 3) as i32) || (flag)) {
             let multiplier = Scientific::get_multiplier(self.get_value(), increment);
             handle_analysis_errors!(multiplier.is_err(), multiplier);
             self.exponent = new_power;
@@ -226,6 +235,67 @@ impl Default for BigNumber {
         }
     }
 }
+impl PartialEq for BigNumber {
+    fn eq(&self, other: &Self) -> bool {
+        ((self.is_positive == other.is_positive)
+            && (self.base == other.base)
+            && (self.exponent == other.exponent))
+    }
+}
+impl Eq for BigNumber {}
+impl PartialOrd for BigNumber {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let mut result = None;
+        result = match self.exponent.partial_cmp(&other.exponent) {
+            Some(Ordering::Equal) => self.base.partial_cmp(&other.base),
+            Some(x) => Some(x),
+            None => result,
+        };
+        result
+    }
+    fn lt(&self, other: &Self) -> bool {
+        (self.partial_cmp(other).unwrap() == Ordering::Less)
+    }
+    fn le(&self, other: &Self) -> bool {
+        ((self.lt(other)) || (self.partial_cmp(other).unwrap() == Ordering::Equal))
+    }
+    fn gt(&self, other: &Self) -> bool {
+        (self.partial_cmp(other).unwrap() == Ordering::Greater)
+    }
+    fn ge(&self, other: &Self) -> bool {
+        ((self.gt(other)) || (self.partial_cmp(other).unwrap() == Ordering::Equal))
+    }
+}
+impl Ord for BigNumber {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+    fn max(self, other: Self) -> Self
+    where
+        Self: Sized,
+    {
+        match (self > other) {
+            false => other,
+            true => self,
+        }
+    }
+    fn min(self, other: Self) -> Self
+    where
+        Self: Sized,
+    {
+        match (self < other) {
+            false => other,
+            true => self,
+        }
+    }
+    fn clamp(self, min: Self, max: Self) -> Self
+    where
+        Self: Sized,
+        Self: PartialOrd,
+    {
+        (self.min(max)).max(min)
+    }
+}
 impl ops::Add<f32> for BigNumber {
     type Output = BigNumber;
     fn add(self, rhs: f32) -> BigNumber {
@@ -236,32 +306,39 @@ impl ops::Add<f32> for BigNumber {
 impl ops::Add for BigNumber {
     type Output = BigNumber;
     fn add(self, other: BigNumber) -> BigNumber {
-        let mut sum = self.clone();
-        let base_delta = other.base / Real::powi(10.0, (sum.exponent - other.exponent)) as f32;
+        let mut sum = BigNumber::max(self.clone(), other.clone());
+        let mut other_min = BigNumber::min(self.clone(), other.clone());
+        let base_delta =
+            other_min.base / Real::powi(10.0, sum.exponent - other_min.exponent) as f32;
         let new_base = (sum.base * sign_from_bool(sum.is_positive) as f32)
-            + (sign_from_bool(other.is_positive) as f32 * base_delta);
-        if (new_base.floor() - sum.base.floor()).abs() > 0.0 {
-            let is_bounce = (new_base < 0.0);
-            let exponent_difference = (new_base.log10().floor() - sum.base.log10().floor()).abs();
-            let reverse_difference =
-                sign_from_bool((new_base.log10() - f32::max(sum.base, base_delta).log10()) > 1.0);
-            if (is_bounce) {
-                sum.is_positive = false;
-            }
-            sum.increase_power(
-                reverse_difference
-                    * match exponent_difference as i32 * sign_from_bool(other.is_positive) {
-                        x => {
-                            if x > 0 {
-                                x + 1
-                            } else {
-                                x - 1
-                            }
-                        }
-                    },
-                is_bounce,
-            );
+            + (sign_from_bool(other_min.is_positive) as f32 * base_delta);
+        let is_bounce = ((new_base < 0.0) && sum.is_positive);
+        let exponent_difference = new_base.log10().floor()
+            - match is_bounce {
+                false => new_base.log10().floor(),
+                true => new_base.log10().floor() - other_min.base.log10(),
+            };
+        if (is_bounce) {
+            sum.is_positive = false;
         }
+        sum.increase_power(
+            match exponent_difference as i32 * sign_from_bool(other_min.is_positive) {
+                x => {
+                    let mut new_x = x;
+                    if (is_bounce) {
+                        if (x > 0) {
+                            new_x = x + 1;
+                        } else {
+                            new_x = x - 1;
+                        }
+                    } else {
+                        new_x += other_min.base.log10().floor() as i32;
+                    }
+                    new_x
+                }
+            },
+            is_bounce,
+        );
         sum.base = get_first_significant_figure(new_base.abs());
         match sum.serialized {
             Format::Haven(_) => {
